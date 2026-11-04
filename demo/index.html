@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>vesper-mod demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  #log { color: #555; white-space: pre-wrap; }
+  input { width: 70%; padding: .5rem; }
+  button { padding: .5rem 1rem; }
+</style>
+<h1>给会话发一句话</h1>
+<p>这个页面只和迷你服务说话；服务只和 mod 的 file inbox 说话。
+服务只绑本机，发送要带口令（由服务下发进页面）。</p>
+<h2>发一句话</h2>
+<input id="text" placeholder="给会话发一句话…">
+<button id="send">发送</button>
+<pre id="log"></pre>
+<script>
+  const log = document.getElementById('log');
+  document.getElementById('send').onclick = async () => {
+    const text = document.getElementById('text').value;
+    const msg_id = 'web-' + Date.now();
+    const r = await fetch('/send', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Vesper-Key': '__VESPER_TOKEN__' },
+      body: JSON.stringify({ msg_id, text }) });
+    log.textContent += `send -> ${r.status} ${await r.text()}\n`;
+  };
+</script>
+</html>

@@ -1,0 +1,6 @@
+{
+  "name": "vesper-mod",
+  "version": "1.0.0",
+  "description": "A web sender's sentence into this Claude Code session, via a file inbox",
+  "license": "MIT"
+}
