@@ -167,7 +167,9 @@ async function begin($: EngineInterface) {
     if (typeof config.preview_url === 'string' && config.preview_url !== '') {
       try {
         const url = new URL(config.preview_url)
-        if (url.protocol === 'http:' || url.protocol === 'https:') {
+        // Frames carry the whole turn's text: this machine only.
+        if ((url.protocol === 'http:' || url.protocol === 'https:')
+          && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {
           previewUrl = config.preview_url
           preview = new Preview()
           preview.loadedAt = await $.clock.now()
@@ -176,7 +178,7 @@ async function begin($: EngineInterface) {
           })
         }
       } catch {
-        // an unusable preview_url means no preview, never a failed start
+        // an unusable or non-local preview_url means no preview, never a failed start
       }
     }
     boundId = await $.session.id()

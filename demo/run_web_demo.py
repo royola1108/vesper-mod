@@ -129,6 +129,9 @@ def main() -> int:
             assert not inbox_path(state, "web-1").exists(), \
                 "service must delete the inbox file after the ack"
             print(f"3. POST /send acked, ack has no text, inbox file gone: OK ({result['ack']})")
+            status, result = post("/send", {"msg_id": "web-1", "text": "another sentence"},
+                                  headers={"X-Vesper-Key": TOKEN})
+            assert status == 409 and result["error"] == "duplicate_msg_id", (status, result)
 
             status, _ = post("/send", {"msg_id": "web-9", "text": "no token"})
             assert status == 401, status

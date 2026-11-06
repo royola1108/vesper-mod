@@ -67,7 +67,7 @@ claude --session-id <session id> --plugin-dir <installed to 后面的路径>
 
 - **心跳**：mod 每秒写 `.alive`，服务只认 5 秒内的。
 - **占位**：mod 先写 `.taking` 再读文件，后来的 poller 看到标记就跳过，热重载不会把同一句送两次。
-- **回执**：`{msg_id, uuid, door}`，或被拒时的 `{msg_id, refused, door}`，都不带正文。
+- **回执**：`{msg_id, uuid, door}`，或被拒时的 `{msg_id, refused, door}`，都不带正文。回执留在盘上，所以 `msg_id` 不能重复用，每句一个新的；demo 服务遇到重复的答 409。
 - **删文件**：mod 不删 inbox 文件（`$.fs` 没有删除），服务拿到结果后立刻删。超时先删再看 `.taking`，这样晚起来的 mod 不会把旧话送进去。服务启动时清掉残留文件，清不干净就拒绝启动。
 - **`/clear`**：session id 会变，mod 每秒重读并跟过去。demo 服务的 id 是启动时定的，要用新 id 重启，否则返回 503。
 
@@ -105,7 +105,7 @@ nudge 这一行你的前端要自己过滤，按结构判断，不要比对文�
 
 mod 每 250 毫秒把这一轮的整份状态 POST 过去：文本块和 thinking 块（thinking 块带 `kind: "thinking"`）、已开始的工具调用（只有 id 和名字，不带参数）、这一轮回答的输入行 uuid（`inputs`）。每个回合结束发一帧 `done: true`，带 `reason`（回合为什么结束），内容是这一轮的最后状态。发失败就算了，不排队，也不影响会话。重新安装时这一行会自动带到新拷贝。
 
-接收端要你自己写，demo 服务不接。帧格式在 `docs/advanced.md` 第 7 节。预览帧不带口令，里面是全文，接收端只绑本机。
+接收端要你自己写，demo 服务不接。帧格式在 `docs/advanced.md` 第 7 节。预览帧不带口令，里面是全文，所以 `preview_url` 只接受本机地址（`127.0.0.1`、`localhost`、`[::1]`），别的地址等于没开预览；接收端也只绑本机。
 
 ## 文件
 

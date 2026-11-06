@@ -19,7 +19,7 @@
   const log = document.getElementById('log');
   document.getElementById('send').onclick = async () => {
     const text = document.getElementById('text').value;
-    const msg_id = 'web-' + Date.now();
+    const msg_id = 'web-' + crypto.randomUUID();
     const r = await fetch('/send', { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Vesper-Key': '__VESPER_TOKEN__' },
       body: JSON.stringify({ msg_id, text }) });

@@ -24,8 +24,9 @@ Lifecycle, because the real mod never deletes an inbox file itself:
     (fail-closed, so old text is not left on disk);
   * after an ack or a refusal, the service deletes that message's
     inbox file at once -- without this, text would stay on disk
-    after the ack, which is the opposite of what the README used
-    to claim;
+    after the ack;
+  * acks stay on disk, so a msg_id that already has one is refused
+    (409): the old ack must not pass for the new text;
   * before sending, the service checks alive(): no heartbeat means
     an immediate refusal, not a written file that later times out;
   * on timeout (5 s, no ack, no refusal), the service deletes the
@@ -117,6 +118,9 @@ def make_handler(route: ModRoute, token: str, session: str):
                 msg_id, text = body.get("msg_id"), body.get("text")
                 if not isinstance(msg_id, str) or not isinstance(text, str):
                     self._send_json(400, {"error": "msg_id_and_text_required"})
+                    return
+                if route.ack_path(msg_id).exists() or route.taking_exists(msg_id):
+                    self._send_json(409, {"error": "duplicate_msg_id"})
                     return
                 # No heartbeat: refuse at once, do not write a file that
                 # would sit on disk and time out later.
