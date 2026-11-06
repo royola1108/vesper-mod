@@ -3,7 +3,7 @@
 <style>
 body{font:14px system-ui;margin:0;display:flex;height:100vh}
 #side{width:260px;overflow:auto;border-right:1px solid #ccc;padding:8px}
-#side div{padding:6px;cursor:pointer;border-radius:4px}#side div:hover{background:#eee}
+#list div{padding:6px;cursor:pointer;border-radius:4px}#list div:hover{background:#eee}
 #main{flex:1;display:flex;flex-direction:column}
 #log{flex:1;overflow:auto;padding:8px;white-space:pre-wrap}
 .user{color:#06c}.notice{color:#b00;font-weight:bold}.ev{color:#888;font-size:12px}
@@ -12,7 +12,7 @@ body{font:14px system-ui;margin:0;display:flex;height:100vh}
 </style>
 <div id=login><input id=pw type=password placeholder=password><button onclick=login()>login</button></div>
 <div id=app style=display:none;width:100%;display:none>
-<div id=side></div>
+<div id=side><button onclick=threads()>刷新</button><div id=list></div></div>
 <div id=main><div id=log></div>
 <div id=bar><input id=txt placeholder="message" onkeydown="if(event.key=='Enter')send()">
 <button onclick=send()>send</button><button onclick=stop()>stop</button></div></div></div>
@@ -22,9 +22,10 @@ async function api(p,b){const r=await fetch(p,b?{method:'POST',headers:{'Content
  const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j}
 function add(t,c){const d=document.createElement('div');d.className=c||'';d.textContent=t;$('log').append(d);$('log').scrollTop=1e9;return d}
 async function login(){try{await api('/api/login',{password:$('pw').value});$('login').style.display='none';$('app').style.cssText='display:flex;width:100%';start()}catch(e){alert(e.message)}}
-async function start(){
- const ts=await api('/api/threads');$('side').innerHTML='';
- for(const t of ts){const d=document.createElement('div');d.textContent=(t.name||t.preview||t.id).slice(0,60);d.title=t.cwd||'';d.onclick=()=>attach(t.id);$('side').append(d)}
+async function threads(){
+ const ts=await api('/api/threads');$('list').innerHTML=ts.length?'':'还没有线程：先在终端用 Codex 说一句，再点刷新';
+ for(const t of ts){const d=document.createElement('div');d.textContent=(t.name||t.preview||t.id).slice(0,60);d.title=t.cwd||'';d.onclick=()=>attach(t.id);$('list').append(d)}}
+async function start(){await threads();
  const es=new EventSource('/api/events');es.onmessage=e=>ev(JSON.parse(e.data))}
 async function attach(id){const r=await api('/api/attach',{threadId:id});$('log').innerHTML='';cur=null;
  for(const m of r.history)add((m.role=='user'?'> ':'')+m.text,m.role)}

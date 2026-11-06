@@ -77,7 +77,9 @@ def make_handler(st, password, allowed_hosts):
             if not self._authed(): return
             if self.path == "/api/threads":
                 try:
-                    r = st.c.call("thread/list", {"limit": 50})
+                    # useStateDbOnly: without it, threads restored from a backup do not show
+                    r = st.c.call("thread/list", {"limit": 100, "archived": False, "sortKey": "updated_at",
+                                                  "sortDirection": "desc", "useStateDbOnly": True})
                     self._json([{k: t.get(k) for k in ("id", "name", "preview", "cwd", "updatedAt")} for t in r["data"]])
                 except RpcError as e: self._json({"error": str(e)}, 502)
             elif self.path == "/api/events":

@@ -109,7 +109,7 @@ mod 每 250 毫秒把这一轮的整份状态 POST 过去：文本块和 thinkin
 
 ## codex/
 
-`codex/` 是另一个小包:一个本机网页,接到已经在跑的官方 Codex app-server 常驻 daemon,列线程、发话、看实时事件,终端里的 Codex CLI 用 `--remote` 接同一个 daemon 时是同一个线程。只用 Python 标准库,不带审批界面,审批请求一律不放行。用法、安全说明和测过的 Codex 版本见 [`codex/README.md`](codex/README.md)。
+`codex/` 是另一个小包，给 Codex 用：一个本机网页，接到已经在跑的官方 app-server 常驻 daemon，列线程、发话、看实时事件；接同一个 daemon 的终端 Codex 看到的是同一个线程。只用 Python 标准库。没有审批界面，审批请求不放行。详见 [`codex/README.md`](codex/README.md)。
 
 ## 文件
 
@@ -117,6 +117,7 @@ mod 每 250 毫秒把这一轮的整份状态 POST 过去：文本块和 thinkin
 - `tools/install.py`：按内容哈希安装一份拷贝
 - `demo/`：协议实现、mod 替身、迷你服务和页面
 - `docs/advanced.md`：`/clear` 重绑、模型和压缩控制、transcript 行归属、预览帧格式
+- `codex/`：接常驻 Codex daemon 的网页小包
 
 真会话测过的：闲时提交、忙时追加、nudge、`/clear` 和 mod 退出后的 503、回执后文件已删、预览的各种帧（含 `inputs`、`tools`、`reason`）。5 秒超时只在 demo 里测过。
 
