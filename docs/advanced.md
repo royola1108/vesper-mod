@@ -33,7 +33,7 @@ else:
     id = session.id()
     if id 有效 and id != bound_id:
         bound_id = id
-        inbox 目录、.alive 全部切到新 id（preview 块缓存清空、seq 归零）
+        inbox 目录、.alive 全部切到新 id（preview 块缓存清空、seq 不归零，`session_id` 变了）
         # 旧 id 下还没 ack 的消息：不重发
         # .taking 标记还在，说明它已经被取走过一次；
         # 服务端对它只能判 "unknown"，不能猜它成功了
@@ -96,11 +96,11 @@ poll tick:
 
 ## 7. 实时输出预览（接收端协议）
 
-v1 代码里已内置 hook 一侧的插座：在安装副本的 `config.json` 里填上 `preview_url`，hook 就会每 250ms 发送快照；不填就不发；文本块和 thinking 块都发，thinking 块带 `kind: 'thinking'` 标记，接收端可以自己决定显不显示。demo 服务没有内置接收端。下面是你自己的前端服务要接这套预览流时需实现的接收端契约。
+v1 代码里已内置 hook 一侧的插座：在安装副本的 `config.json` 里填上 `preview_url`，hook 就会每 250ms 发送快照；不填就不发；文本块和 thinking 块都发，thinking 块带 `kind: 'thinking'` 标记，接收端可以自己决定显不显示；已开始的工具调用和这一轮回答的输入行 uuid 也随帧带上。demo 服务没有内置接收端。下面是你自己的前端服务要接这套预览流时需实现的接收端契约。
 
 目的只有一个：不用等一整轮回答写完，网页前端就能实时看到 Claude 正在写出的文本。
 
-做法不是逐 token 推流，而是**定频轮询快照**：hook 每 250ms 把本轮已经写出的文本块和 thinking 块整份 POST 给接收端，接收端再用 SSE 或 WebSocket 推给浏览器。因为每一帧快照本身就是当前回合的完整最新状态，丢一帧完全不用补，下一 tick（250ms 后）重新抓最新快照即可。
+做法不是逐 token 推流，而是**定频轮询快照**：hook 每 250ms 把本轮的状态（已经写出的文本块和 thinking 块、工具调用、输入行）整份 POST 给接收端，接收端再用 SSE 或 WebSocket 推给浏览器。因为每一帧快照本身就是当前回合的完整最新状态，丢一帧完全不用补，下一 tick（250ms 后）重新抓最新快照即可。
 
 ```
 示意接收路由（占位示例，由你自己的服务实现）：
@@ -108,28 +108,43 @@ v1 代码里已内置 hook 一侧的插座：在安装副本的 `config.json` �
 
 配置方式：
     将上述地址填入安装副本 config.json 的 "preview_url" 字段。
-    hook 每 tick 检查当前 session id；/clear 后 id 变了会自动清掉旧回合的块、
-    seq 归零；每个回合结束（turn.complete）时都发一帧 done: true，随后清空块缓存。
+    hook 每 tick 检查当前 session id；/clear 后 id 变了会自动清掉旧回合的状态，
+    帧里的 session_id 随之改变；每个回合结束（turn.complete）时都发一帧 done: true，
+    带 reason，随后清空缓存。
 
 帧格式（JSON Body，与 register.ts 里的 Preview.frame 一致）：
 {
   "session_id": "<当前 session id>",
-  "seq": 1,           // 每帧严格递增；/clear 重绑后归零
+  "load_id": "<这次加载 mod 时生成的随机 id>",
+  "loaded_at_ms": 1760000000000,   // 这次加载的时间，毫秒
+  "seq": 1,           // 同一个 load_id 内严格递增；/clear 不归零，热重载换 load_id 后从 1 重新数
   "turn_id": "<当前回合 id 或 null>",
   "blocks": [
     { "step": 0, "attempt": 1, "index": 0, "text": "正在写出的文本…" },
     { "step": 0, "attempt": 1, "index": 1, "kind": "thinking", "text": "正在思考的内容…" }
   ],
-  "done": false       // 回合结束那帧为 true，发完后块被清空
+  "inputs": ["<这一轮回答的输入行 uuid>"],
+  "tools": [
+    { "step": 0, "attempt": 1, "index": 2, "id": "<tool_use_id>", "name": "Bash" }
+  ],
+  "done": false,      // 回合结束那帧为 true，发完后缓存被清空
+  "reason": "answer"  // 只在 done 帧里有：回合为什么结束（answer、interrupt 等 turn.complete 给的值）
 }
 ```
 
 **块与熔断规则：**
-- 块的复合键是 `(step, attempt, index)`：同一块的文本随着流式输出只会往后追加；如果某一步报错重试（`failStep`），对应 `attempt` 的块会被整批丢弃。
+- 块的复合键是 `(step, attempt, index)`：同一块的文本随着流式输出只会往后追加；如果某一步报错重试（`failStep`），对应 `attempt` 的块和工具会被整批丢弃。
 - 快照永远是当前回合的全量块列表，不是增量 diff。
-- **容量熔断**：单回合总字数（文本块与 thinking 块合计）超过 32,768 字时，本回合的预览撤回（防止超长输出占用内存）：之后的帧 `blocks` 为空，回合结束照发 `done: true`，下一回合恢复。
+- **容量熔断**：单回合总字数（文本块与 thinking 块合计）超过 32,768 字时，本回合的文本预览撤回（防止超长输出占用内存）：之后的帧 `blocks` 为空，回合结束照发 `done: true`，下一回合恢复。`tools` 不受影响。
+
+**`inputs` 和 `tools`：**
+- `inputs` 是这一轮回答的输入行的 uuid，按 `session.append` 的 door 收：door 为 `prompt` 的行（用户在终端敲的，或本插件提交的）总在它开启的那一轮之前到，记下来，归下一轮；一轮运行中到的 door 为 `delivery` 的行，以及本插件自己的忙时 `note` 行，归当前轮。不按 `prompt.submit` 的 turnId，那个只说明发话时哪一轮在跑。uuid 与 transcript 里那一行的 uuid 一致，接收端可以用它把预览和正式行对上。子代理的行不算。最多留最近 32 个。
+- `tools` 只有工具调用的开始：`id` 就是 transcript 里 `tool_use` 的 id，不带参数。某一步失败重试时，那个 `attempt` 的工具会去掉。最多留最近 32 个。
+- 没有文本、只有工具调用的时候，帧里 `blocks` 为空而 `tools` 不空：这是正常状态，不是撤回。
 
 **接收端只需遵守三条规则：**
 1. `seq` 不递增的乱序旧帧直接丢弃；
-2. 收到 `done: true`（或从 transcript JSONL 读到正式落盘的回复行）后结束预览态，此前收到的快照均作为临时预览渲染；
-3. `blocks` 为空的帧表示撤回，清掉正在显示的预览。
+2. 收到 `done: true`（或从 transcript JSONL 读到正式落盘的回复行）后结束预览态，此前收到的快照均作为临时预览渲染；`done` 帧带着这一轮的最后状态和 `reason`；
+3. `blocks` 为空的帧表示没有文字预览可显示（撤回，或还没有文字），清掉正在显示的文字预览。
+
+`seq` 只在同一个 `load_id` 内比较：`load_id` 换了（mod 热重载），`loaded_at_ms` 更大的那个为新，旧的 `seq` 记录作废。否则热重载后 `seq` 从 1 重新数，接收端会把新帧当成乱序旧帧丢掉。

@@ -6,7 +6,7 @@
 
 它从 Vesper（一个给 AI 搭的私人前端）里抽出来，那边每天都在用，这里只留通用的部分。
 
-在 Claude Code 2.1.318 的真会话上测过。mod 接口可能随 Claude Code 版本变化，不保证跟版。
+在 Claude Code 2.1.319 的真会话上测过。mod 接口可能随 Claude Code 版本变化，不保证跟版。
 
 ## 跑起来
 
@@ -103,7 +103,7 @@ nudge 这一行你的前端要自己过滤，按结构判断，不要比对文�
 "preview_url": "http://127.0.0.1:<port>/api/preview"
 ```
 
-mod 每 250 毫秒把这一轮的文本块和 thinking 块整份 POST 过去，thinking 块带 `kind: "thinking"`，每个回合结束发一帧 `done: true`。发失败就算了，不排队，也不影响会话。重新安装时这一行会自动带到新拷贝。
+mod 每 250 毫秒把这一轮的整份状态 POST 过去：文本块和 thinking 块（thinking 块带 `kind: "thinking"`）、已开始的工具调用（只有 id 和名字，不带参数）、这一轮回答的输入行 uuid（`inputs`）。每个回合结束发一帧 `done: true`，带 `reason`（回合为什么结束），内容是这一轮的最后状态。发失败就算了，不排队，也不影响会话。重新安装时这一行会自动带到新拷贝。
 
 接收端要你自己写，demo 服务不接。帧格式在 `docs/advanced.md` 第 7 节。预览帧不带口令，里面是全文，接收端只绑本机。
 
@@ -114,7 +114,7 @@ mod 每 250 毫秒把这一轮的文本块和 thinking 块整份 POST 过去，t
 - `demo/`：协议实现、mod 替身、迷你服务和页面
 - `docs/advanced.md`：`/clear` 重绑、模型和压缩控制、transcript 行归属、预览帧格式
 
-真会话测过的：闲时提交、忙时追加、nudge、`/clear` 和 mod 退出后的 503、回执后文件已删、预览的各种帧。5 秒超时只在 demo 里测过。
+真会话测过的：闲时提交、忙时追加、nudge、`/clear` 和 mod 退出后的 503、回执后文件已删、预览的各种帧（含 `inputs`、`tools`、`reason`）。5 秒超时只在 demo 里测过。
 
 ## License
 

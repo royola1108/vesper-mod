@@ -17,9 +17,9 @@ import type { EngineInterface, Register } from 'claude-code'
 // `session.start` does not fire), so a change moves the inbox folder polled and `.alive`
 // to the new id at once.
 // Optional preview socket: if the install copy's `config.json` carries a `preview_url`,
-// this module also POSTs a 250 ms snapshot of the current turn's blocks to it
-// (text and thinking; a thinking block carries kind: 'thinking', so a receiver
-// can tell it apart or hide it. Best-effort, silent on failure; nothing is queued).
+// this module also POSTs a 250 ms snapshot of the current turn to it: its text and
+// thinking blocks (a thinking block carries kind: 'thinking'), the tool calls started,
+// and the uuids of the rows the turn answers. Best-effort, silent on failure; nothing is queued.
 // No `preview_url` means no preview traffic at all. The demo service has no receiver;
 // the frame protocol a receiver must accept is in `docs/advanced.md` section 7.
 
@@ -27,33 +27,47 @@ type Door = 'prompt' | 'note'
 type Config = { state_dir: string; source_sha: string; preview_url?: string }
 
 // Preview snapshot state: the current turn's blocks, keyed by
-// (step, attempt, chunk index) the way the turn.step stream numbers them.
-// `kind` only on a thinking block; a text block carries none, so a frame of text alone is
-// byte for byte what it was before thinking was observed.
-// Over the cap (32768 chars) the turn's preview is withdrawn until the next turn
+// (step, attempt, chunk index) the way the turn.step stream numbers them, plus the tool calls
+// started and the uuids of the rows the turn answers.
+// `kind` only on a thinking block; a text block carries none.
+// Over the cap (32768 chars) the turn's text preview is withdrawn until the next turn
 // starts, instead of growing without bound: frames go on with empty blocks.
 export type PreviewBlock = { step: number; attempt: number; index: number; kind?: 'thinking'; text: string }
+export type PreviewTool = { step: number; attempt: number; index: number; id: string; name: string }
+const MAX_ITEMS = 32 // `inputs` and `tools`: the oldest leave first
+const keep = <T>(list: T[], item: T) => { list.push(item); if (list.length > MAX_ITEMS) list.shift() }
 export class Preview {
+  // One load of this module: a hot reload starts `seq` over, so a receiver compares `seq` only within a `load_id`.
+  readonly loadId = crypto.randomUUID()
+  loadedAt = 0
   private seq = 0
   private blocks = new Map<string, PreviewBlock>()
+  private tools: PreviewTool[] = []
+  private inputs: string[] = []
+  private staged: string[] = [] // door `prompt` rows, which arrive ahead of the turn.start that takes them
   private attempt = 0
   private turn: string | null = null
   private suppressed = false
   startTurn(turn: string | null) {
     this.turn = turn
-    this.blocks.clear()
-    this.suppressed = false
+    this.clear()
+    this.inputs = this.staged
+    this.staged = []
   }
   endTurn() {
     this.turn = null
-    this.blocks.clear()
-    this.suppressed = false
+    this.clear()
   }
   rebind() {
     this.turn = null
+    this.clear()
+    this.staged = []
+  }
+  private clear() {
     this.blocks.clear()
+    this.tools = []
+    this.inputs = []
     this.suppressed = false
-    this.seq = 0
   }
   beginStep(): number {
     this.attempt += 1
@@ -72,22 +86,40 @@ export class Preview {
       this.suppressed = true
     }
   }
+  // A tool call started (name only, no arguments). Kept whether or not the text was withdrawn.
+  tool(step: number, attempt: number, index: number, id: string, name: string) {
+    keep(this.tools, { step, attempt, index, id, name })
+  }
+  // The rows a turn answers, by door: `prompt` (typed, or submitted by this plugin) comes ahead of the turn it
+  // opens; `delivery` and this plugin's own busy `note` land inside the running turn. Never `prompt.submit`'s
+  // turnId, which only says which turn was running when the line was sent.
+  input(door: string, uuid: string, own: boolean) {
+    if (door === 'prompt') keep(this.staged, uuid)
+    else if (this.turn !== null && (door === 'delivery' || (door === 'note' && own))) keep(this.inputs, uuid)
+  }
   failStep(attempt: number) {
     for (const [key, block] of this.blocks) {
       if (block.attempt === attempt) this.blocks.delete(key)
     }
+    this.tools = this.tools.filter(t => t.attempt !== attempt)
   }
   // Worth a tick: something to show, or a withdrawal the receiver must clear.
   get live() {
-    return this.blocks.size > 0 || this.suppressed
+    return this.blocks.size > 0 || this.tools.length > 0 || this.suppressed
   }
-  frame(sessionId: string, done: boolean) {
+  // `seq` is stamped here, when the frame is built to be sent, so it rises in send order.
+  frame(sessionId: string, done: boolean, reason?: string) {
     return {
       session_id: sessionId,
+      load_id: this.loadId,
+      loaded_at_ms: this.loadedAt,
       seq: ++this.seq,
       turn_id: this.turn,
       blocks: [...this.blocks.values()],
+      inputs: [...this.inputs],
+      tools: [...this.tools],
       done,
+      ...(done ? { reason } : {}),
     }
   }
 }
@@ -138,6 +170,7 @@ async function begin($: EngineInterface) {
         if (url.protocol === 'http:' || url.protocol === 'https:') {
           previewUrl = config.preview_url
           preview = new Preview()
+          preview.loadedAt = await $.clock.now()
           $.clock.every(250, () => {
             void postPreview($, false)
           })
@@ -204,12 +237,12 @@ async function tick($: EngineInterface, config: Config, acks: string) {
   }
 }
 
-// One preview POST: the current turn's full snapshot. A tick sends nothing while
+// One preview POST: the current turn's full snapshot (the done frame carries the turn's last state and why it ended). A tick sends nothing while
 // a frame is in flight or there is nothing to show. Best-effort and never queued:
 // a failed frame is simply replaced by the next tick's snapshot. The done frame
 // goes out once per turn whatever a tick is doing; its body is built before the
 // first await, so the caller may clear the blocks at once.
-async function postPreview($: EngineInterface, done: boolean): Promise<void> {
+async function postPreview($: EngineInterface, done: boolean, reason?: string): Promise<void> {
   if (!preview || previewUrl === '') return
   if (!done && (previewSending || !preview.live)) return
   if (!done) previewSending = true
@@ -217,7 +250,7 @@ async function postPreview($: EngineInterface, done: boolean): Promise<void> {
     await $.http.fetch(previewUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(preview.frame(boundId, done)),
+      body: JSON.stringify(preview.frame(boundId, done, reason)),
     })
   } catch {
     // next tick sends the latest full snapshot
@@ -374,10 +407,10 @@ export const register: Register = on => {
   })
 
   // Counted before `next`: the hook fires as the engine is about to send that request.
-  // With preview on, the main loop's stream is also read for text and thinking chunks:
-  // each chunk extends its block, and the 250 ms ticker posts the whole snapshot.
+  // With preview on, the main loop's stream is also read for text and thinking chunks
+  // (each extends its block) and tool chunks (name and id only); the 250 ms ticker posts the whole snapshot.
   // A thinking block is recorded with kind: 'thinking'; a text block carries no kind.
-  // A failed step drops its blocks.
+  // A failed step drops its blocks and tools.
   on('turn.step', async function* ($, e, next) {
     stepSeen(e.agentId)
     if (e.agentId !== undefined || !preview) return yield* next(e)
@@ -386,10 +419,14 @@ export const register: Register = on => {
     const stream = next(e)
     try {
       for await (const chunk of stream) {
-        const c = chunk as { kind?: unknown; index?: unknown; text?: unknown } | null
-        if (c && (c.kind === 'text' || c.kind === 'thinking') && typeof c.index === 'number' && typeof c.text === 'string') {
+        const c = chunk as { kind?: unknown; index?: unknown; text?: unknown; id?: unknown; name?: unknown } | null
+        if (c && typeof c.index === 'number') {
           try {
-            preview.feed(stepIndex, attempt, c.index, c.text, c.kind === 'thinking' ? 'thinking' : undefined)
+            if ((c.kind === 'text' || c.kind === 'thinking') && typeof c.text === 'string') {
+              preview.feed(stepIndex, attempt, c.index, c.text, c.kind === 'thinking' ? 'thinking' : undefined)
+            } else if (c.kind === 'tool' && typeof c.id === 'string' && typeof c.name === 'string') {
+              preview.tool(stepIndex, attempt, c.index, c.id, c.name)
+            }
           } catch {
             // observation only: never disturb the stream
           }
@@ -408,7 +445,7 @@ export const register: Register = on => {
     const result = await next(e)
     completed($, e)
     if (e.agentId === undefined) {
-      void postPreview($, true) // no network await in a hook
+      void postPreview($, true, typeof e.reason === 'string' ? e.reason : undefined) // no network await in a hook
       preview?.endTurn()
     }
     return result
@@ -420,6 +457,9 @@ export const register: Register = on => {
   // refuse the user's row (`ackRow` swallows it: the service then ends that sentence `unknown`).
   on('session.append', async ($, e, next) => {
     const kept = await next(e)
+    if (preview && e.agentId === undefined && kept.deny === undefined) {
+      try { preview.input(e.door, kept.uuid, e.origin?.kind === 'plugin' && e.origin.name === $.plugin.name) } catch { /* observation only */ }
+    }
     await ackRow((path, text) => $.fs.write(path, text), e, $.plugin.name)
     return kept
   })
