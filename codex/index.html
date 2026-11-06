@@ -1,0 +1,43 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>codex-shared</title>
+<style>
+body{font:14px system-ui;margin:0;display:flex;height:100vh}
+#side{width:260px;overflow:auto;border-right:1px solid #ccc;padding:8px}
+#side div{padding:6px;cursor:pointer;border-radius:4px}#side div:hover{background:#eee}
+#main{flex:1;display:flex;flex-direction:column}
+#log{flex:1;overflow:auto;padding:8px;white-space:pre-wrap}
+.user{color:#06c}.notice{color:#b00;font-weight:bold}.ev{color:#888;font-size:12px}
+#bar{display:flex;gap:6px;padding:8px;border-top:1px solid #ccc}#bar input{flex:1}
+#login{padding:20px}
+</style>
+<div id=login><input id=pw type=password placeholder=password><button onclick=login()>login</button></div>
+<div id=app style=display:none;width:100%;display:none>
+<div id=side></div>
+<div id=main><div id=log></div>
+<div id=bar><input id=txt placeholder="message" onkeydown="if(event.key=='Enter')send()">
+<button onclick=send()>send</button><button onclick=stop()>stop</button></div></div></div>
+<script>
+const $=id=>document.getElementById(id);let turn=null,cur=null,mine=[];
+async function api(p,b){const r=await fetch(p,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});
+ const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j}
+function add(t,c){const d=document.createElement('div');d.className=c||'';d.textContent=t;$('log').append(d);$('log').scrollTop=1e9;return d}
+async function login(){try{await api('/api/login',{password:$('pw').value});$('login').style.display='none';$('app').style.cssText='display:flex;width:100%';start()}catch(e){alert(e.message)}}
+async function start(){
+ const ts=await api('/api/threads');$('side').innerHTML='';
+ for(const t of ts){const d=document.createElement('div');d.textContent=(t.name||t.preview||t.id).slice(0,60);d.title=t.cwd||'';d.onclick=()=>attach(t.id);$('side').append(d)}
+ const es=new EventSource('/api/events');es.onmessage=e=>ev(JSON.parse(e.data))}
+async function attach(id){const r=await api('/api/attach',{threadId:id});$('log').innerHTML='';cur=null;
+ for(const m of r.history)add((m.role=='user'?'> ':'')+m.text,m.role)}
+async function send(){const t=$('txt').value;if(!t)return;$('txt').value='';add('> '+t,'user');mine.push(t);
+ try{turn=(await api('/api/send',{text:t})).turnId}catch(e){add(e.message,'notice')}}
+async function stop(){if(turn)try{await api('/api/interrupt',{turnId:turn})}catch(e){add(e.message,'notice')}}
+function ev(e){
+ if(e.kind=='notice'){add('['+e.method+'] '+JSON.stringify(e.params.command||e.params).slice(0,300)+' -> '+e.answered+' (this page never approves)','notice');return}
+ const p=e.params;
+ if(e.method=='item/agentMessage/delta'){if(!cur)cur=add('');cur.textContent+=p.delta}
+ else if(e.method=='item/completed'){const i=p.item;
+  if(i.type=='agentMessage'){if(cur)cur.textContent=i.text;else add(i.text)}
+  else if(i.type=='userMessage'){const t=i.content.map(c=>c.text||'').join('');const k=mine.indexOf(t);if(k>=0)mine.splice(k,1);else add('> '+t,'user')}else add('['+i.type+'] '+(i.command||''),'ev');cur=null}
+ else if(e.method=='turn/started'){turn=p.turn&&p.turn.id}
+ else if(e.method=='turn/completed'){cur=null;add('-- '+((p.turn||{}).status||'done'),'ev')}}
+</script>

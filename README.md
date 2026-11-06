@@ -107,6 +107,10 @@ mod 每 250 毫秒把这一轮的整份状态 POST 过去：文本块和 thinkin
 
 接收端要你自己写，demo 服务不接。帧格式在 `docs/advanced.md` 第 7 节。预览帧不带口令，里面是全文，所以 `preview_url` 只接受本机地址（`127.0.0.1`、`localhost`、`[::1]`），别的地址等于没开预览；接收端也只绑本机。
 
+## codex/
+
+`codex/` 是另一个小包:一个本机网页,接到已经在跑的官方 Codex app-server 常驻 daemon,列线程、发话、看实时事件,终端里的 Codex CLI 用 `--remote` 接同一个 daemon 时是同一个线程。只用 Python 标准库,不带审批界面,审批请求一律不放行。用法、安全说明和测过的 Codex 版本见 [`codex/README.md`](codex/README.md)。
+
 ## 文件
 
 - `plugin/`：真 mod，主体是 `hooks/register.ts`
