@@ -38,6 +38,8 @@ CODEX_SHARED_PASSWORD='换成你自己的口令' python3 server.py --endpoint un
 codex resume <线程 id> --remote unix://$HOME/.local/state/codex-shared/app.sock
 ```
 
+如果用官方的 remote control 起 daemon(`codex remote-control start`,或 `codex app-server daemon enable-remote-control`),之后在终端直接打开 `codex` 就在 daemon 里,不用再加 `--remote`。这种方式本包没有单独测过,daemon 的 socket 路径请按你的版本确认。
+
 `--endpoint` 也接受 `ws://127.0.0.1:端口`(daemon 用 `--listen ws://127.0.0.1:端口` 起);daemon 若要求 bearer token,用 `--token-env 环境变量名` 传入,不要写进命令行。非本机的明文 `ws://` 会被拒绝。
 
 ## 审批请求
